@@ -1,0 +1,6 @@
+{
+  "name": "Gerador de Plano de Aula BNCC",
+  "description": "Assistente de preenchimento e automação documental de Planos de Aula no padrão BNCC, com suporte à exportação de DOCX/PDF e preenchimento inteligente via IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
