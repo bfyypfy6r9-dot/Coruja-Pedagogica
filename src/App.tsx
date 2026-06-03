@@ -347,9 +347,9 @@ function smartFillDocxXml(xmlStr: string, plan: LessonPlanData): string {
 }
 
 // @ts-ignore
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://dummy.supabase.co';
 // @ts-ignore
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'dummy';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 interface LoginProps {
@@ -378,7 +378,13 @@ function Login({ onLogin, onCancel }: LoginProps) {
         throw new Error(error.message);
       }
 
-      onLogin(data.session, data.user);
+      const { data: perfil } = await supabase
+        .from('perfis')
+        .select('role')
+        .eq('id', data.user.id)
+        .single();
+
+      onLogin(data.session, { ...data.user, role: perfil?.role || 'usuario' });
     } catch (err: any) {
       setError(err.message || 'Erro ao fazer login');
     } finally {
@@ -547,8 +553,14 @@ export default function App() {
         if (res.ok) {
           const data = await res.json();
           if (data.session && data.user) {
+            const { data: perfil } = await supabase
+              .from('perfis')
+              .select('role')
+              .eq('id', data.user.id)
+              .single();
+
             setIsAuthenticated(true);
-            setUserRole(data.user.role);
+            setUserRole(perfil?.role || 'usuario');
             setSupabaseSession(data.session);
           }
         }
