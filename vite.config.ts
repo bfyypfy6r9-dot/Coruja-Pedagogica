@@ -10,7 +10,6 @@ export default defineConfig(() => {
       rollupOptions: {
         output: {
           manualChunks: {
-            // Separa bibliotecas grandes em arquivos menores para economizar memória (RAM) no build
             'vendor-react': ['react', 'react-dom'],
             'vendor-utils': ['docxtemplater', 'pizzip', 'docx'],
             'vendor-ui': ['lucide-react', 'motion', '@supabase/supabase-js']
@@ -18,4 +17,14 @@ export default defineConfig(() => {
         }
       }
     },
-    // ... restante das configurações (resolve, server, etc.) continuam iguais
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, '.'),
+      },
+    },
+    server: {
+      hmr: process.env.DISABLE_HMR !== 'true',
+      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+    },
+  };
+});
