@@ -7,6 +7,9 @@ import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import cookieParser from "cookie-parser";
 
+// NodeJS 20 on some platforms lacks native WebSocket for Supabase Realtime
+global.WebSocket = require("ws");
+
 dotenv.config({ override: true });
 
 const app = express();
