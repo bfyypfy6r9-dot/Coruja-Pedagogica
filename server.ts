@@ -8,6 +8,8 @@ import WebSocket from 'ws';
 global.WebSocket = WebSocket as any;
 import { createClient } from "@supabase/supabase-js";
 import cookieParser from "cookie-parser";
+import nodemailer from "nodemailer";
+import crypto from "crypto";
 
 dotenv.config({ override: true });
 
@@ -227,6 +229,133 @@ app.patch("/api/admin/usuario/:id/role", authenticate, requireAdmin, async (req,
   const { error } = await supabaseAdmin.from("perfis").update({ role }).eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
+});
+
+// Endpoint: Webhook da Hotmart
+app.post("/webhook-hotmart", async (req, res) => {
+  try {
+    const hotmartToken = process.env.HOTMART_HOTTOK;
+    
+    // Na v1 pode vir direto no body.hottok ou headers, na v2 costuma vir nos headers
+    const receivedToken = req.headers["x-hotmart-hottok"] || (req.body && req.body.hottok);
+
+    if (!hotmartToken) {
+      console.error("ERRO: HOTMART_HOTTOK não configurado nas variáveis de ambiente!");
+      return res.status(500).send("Erro interno do servidor.");
+    }
+
+    // Camada de Segurança Requerida: Validar o Hottok
+    if (receivedToken !== hotmartToken) {
+      console.error("Tentativa de acesso não autorizada. Hottok inválido:", receivedToken);
+      return res.status(403).send("Não autorizado");
+    }
+
+    // Identifica o evento (V1 envia 'status', V2 envia 'event')
+    const event = req.body.event || req.body.status;
+
+    // Queremos criar o usuário APENAS se a compra foi aprovada
+    if (event === "PURCHASE_APPROVED" || event === "approved") {
+      const email = req.body.data?.buyer?.email || req.body.email;
+      const firstName = req.body.data?.buyer?.name?.split(' ')[0] || req.body.first_name || 'Usuário';
+
+      if (!email) {
+        throw new Error("E-mail do comprador não encontrado no payload da Hotmart.");
+      }
+
+      // 1. Gerar senha aleatória forte de 8 caracteres
+      const geradorSenha = () => {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&';
+        let passwd = '';
+        for (let i = 0; i < 8; i++) {
+          passwd += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return passwd;
+      };
+      const novaSenha = geradorSenha();
+
+      // 2. Criar ou atualizar usuário no Supabase
+      const { data: usuarioExistente } = await supabaseAdmin.from("perfis").select("id").eq("email", email).single();
+      
+      let uId = "";
+
+      if (usuarioExistente) {
+        // Se a pessoa comprar de novo (ex renovação que deu erro e ela recomprou), 
+        // ou já tem conta, podemos atualizar a senha e reativar.
+        uId = usuarioExistente.id;
+        await supabaseAdmin.auth.admin.updateUserById(uId, { password: novaSenha });
+        await supabaseAdmin.from("perfis").update({ ativo: true, role: 'user' }).eq("id", uId);
+      } else {
+        // Criar conta totalmente nova no Auth do Supabase
+        const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+          email,
+          password: novaSenha,
+          email_confirm: true,
+        });
+
+        if (authError || !authData?.user) {
+          throw new Error(`Erro Supabase ao criar usuário Auth: ${authError?.message}`);
+        }
+        uId = authData.user.id;
+
+        // Inserir registro correspondente na tabela "perfis"
+        await supabaseAdmin.from("perfis").upsert({
+          id: uId,
+          email: email,
+          role: 'user', // Pode ser usado 'premium' ou afins caso o App.tsx limite funções por role
+          ativo: true
+        });
+      }
+
+      // 3. Disparar e-mail com os dados de acesso
+      if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+        const transporter = nodemailer.createTransport({
+          host: process.env.SMTP_HOST,
+          port: Number(process.env.SMTP_PORT) || 465,
+          secure: Number(process.env.SMTP_PORT) === 465, // porta 465 exige TLS (secure true)
+          auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS,
+          },
+        });
+
+        const appUrl = process.env.APP_URL || "https://meu-app.onrender.com";
+
+        await transporter.sendMail({
+          from: `"Suporte" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+          to: email,
+          subject: "Seu acesso chegou! O Gerador de Planos de Aula 🚀",
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1f2937;">
+              <h2 style="color: #2563eb;">Obrigado pela compra, ${firstName}!</h2>
+              <p>O seu pagamento foi confirmado! A partir de agora, planejar as suas aulas vai ser muito mais fácil.</p>
+              <br/>
+              <p>Os seus dados de acesso exclusivos (guarde com segurança):</p>
+              <ul style="background: #f8fafc; padding: 20px; border-radius: 8px;">
+                <li><strong>Acessar plataforma:</strong> <a href="${appUrl}" style="color: #2563eb; text-decoration: none;">Clique aqui para entrar</a></li>
+                <li><strong>E-mail:</strong> ${email}</li>
+                <li><strong>Senha provisória:</strong> ${novaSenha}</li>
+              </ul>
+              <br/>
+              <p>Qualquer dúvida, é só responder este e-mail.</p>
+              <p>Um abraço,<br><strong>Equipe</strong></p>
+            </div>
+          `,
+        });
+        console.log(`[Webhook Hotmart] E-mail enviado com sucesso para ${email}`);
+      } else {
+        console.warn("[Webhook Hotmart] Conta de e-mail criada, mas SMTP não configurado. Nenhum e-mail enviado.");
+      }
+
+      return res.status(200).send("Usuário cadastrado com sucesso!");
+    }
+
+    // Caso o evento seja CART_ABANDONED, PURCHASE_REFUNDED, ignorar, mas com status 200
+    return res.status(200).send("Evento Webhook recebido, mas não aplicável.");
+
+  } catch (error: any) {
+    console.error("[Webhook Hotmart] Erro Crítico:", error);
+    return res.status(500).send(`Erro interno ao processar recebimento: ${error.message}`);
+  }
 });
 
 // Endpoint to suggest BNCC skills and competency mapping
