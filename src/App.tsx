@@ -19,12 +19,16 @@ import {
   AlertCircle, 
   RefreshCw, 
   ChevronRight,
-  FolderOpen
+  FolderOpen,
+  LogIn,
+  Lock
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { LessonPlanData, BNCCSkill } from "./types";
 import { SUBJECTS, GRADES, BIMESTRES, BNCC_OFFLINE_SKILLS, BNCC_GENERAL_COMPETENCES } from "./data";
 import { generateDocxFile } from "./documentGenerator";
+import Login from "./Login";
+import PainelAdmin from "./PainelAdmin";
 
 // Initialize empty lesson plan state
 const initialPlanState: LessonPlanData = {
@@ -341,9 +345,17 @@ function smartFillDocxXml(xmlStr: string, plan: LessonPlanData): string {
 }
 
 export default function App() {
+  // Auth state
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [userRole, setUserRole] = useState<'admin' | 'user' | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [showLogin, setShowLogin] = useState<boolean>(false);
+
   const [activeTab, setActiveTab] = useState<number>(0);
   const [plan, setPlan] = useState<LessonPlanData>(initialPlanState);
   
+  const [supabaseSession, setSupabaseSession] = useState<any>(null);
+
   // Custom uploaded DOCX template state
   const [uploadedTemplate, setUploadedTemplate] = useState<{
     name: string;
@@ -398,11 +410,33 @@ export default function App() {
     return window.btoa(binary);
   };
 
+  // Check session on load
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const res = await fetch("/api/auth/session", { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.session && data.user) {
+            setIsAuthenticated(true);
+            setUserRole(data.user.role);
+            setSupabaseSession(data.session);
+          }
+        }
+      } catch (err) {
+        console.error("Erro ao checar sessão:", err);
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    checkSession();
+  }, []);
+
   // Check backend on load for saved school template
   useEffect(() => {
     const fetchSavedTemplate = async () => {
       try {
-        const res = await fetch("/api/template/get");
+        const res = await fetch("/api/template/get", { credentials: 'include' });
         const data = await res.json();
         if (data && data.name && data.base64) {
           const buffer = base64ToArrayBuffer(data.base64);
@@ -423,7 +457,7 @@ export default function App() {
   const handleRemoveTemplate = async () => {
     setUploadedTemplate(null);
     try {
-      const response = await fetch("/api/template/delete", { method: "POST" });
+      const response = await fetch("/api/template/delete", { method: "POST", credentials: 'include' });
       if (response.ok) {
         setSuccessMessage("Modelo da escola removido do servidor com sucesso. Retornado ao modelo padrão.");
       } else {
@@ -509,6 +543,14 @@ export default function App() {
 
   // AI Service call: Predict BNCC Components
   const callSuggestBNCC = async () => {
+    if (!isAuthenticated) {
+      setShowLogin(true);
+      setErrorMessage("Você precisa fazer login para acessar a inteligência artificial do Coruja.");
+      setSuccessMessage(null);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
     if (!plan.tema.trim()) {
       setErrorMessage("Por favor, preencha o campo 'Tema da Aula' na aba '1. Identificação' para que a IA possa analisar e sugerir os componentes.");
       setSuccessMessage(null);
@@ -569,6 +611,14 @@ export default function App() {
 
   // AI Service call: Generate selected sequential lessons
   const callGenerateLessons = async () => {
+    if (!isAuthenticated) {
+      setShowLogin(true);
+      setErrorMessage("Você precisa fazer login para acessar a geração por inteligência artificial.");
+      setSuccessMessage(null);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
     if (!plan.tema.trim()) {
       setErrorMessage("Por favor, insira o tema de sua aula na aba anterior '1. Identificação' para que a IA possa gerar as aulas sequenciais.");
       setSuccessMessage(null);
@@ -1211,8 +1261,34 @@ ${plan.aula6.desenv || "Não informado"}
 ${plan.aula6.concl || "Não informado"}`;
   };
 
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch (e) {}
+    setIsAuthenticated(false);
+    setUserRole(null);
+  };
+
+  const handleLogin = (session: any, user: any) => {
+    setIsAuthenticated(true);
+    setUserRole(user.role);
+    setSupabaseSession(session);
+    setShowLogin(false);
+    setActiveTab(0);
+  };
+
+  if (userRole === 'admin' && activeTab === -1) {
+    return <PainelAdmin onLogout={handleLogout} onClose={() => setActiveTab(0)} session={supabaseSession} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans print:bg-white print:text-black">
+      {showLogin && (
+        <Login 
+          onLogin={handleLogin} 
+          onCancel={() => setShowLogin(false)} 
+        />
+      )}
       {/* Hidden Global Inputs to ensure they are always mounted and clickable from any Tab */}
       <input 
         type="file" 
@@ -1238,32 +1314,50 @@ ${plan.aula6.concl || "Não informado"}`;
             </span>
             <div>
               <h1 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
-                CORUJA PEDAGÓGICA <span className="text-xs font-semibold bg-emerald-600 text-white rounded-md px-1.5 py-0.5">BNCC</span>
+                CORUJA PEDAGÓGICA
               </h1>
               <p className="text-xs text-slate-500">Construa e Edite Planos de Aula</p>
             </div>
           </div>
 
-          {/* Progress bar container */}
+          {/* Progress bar and UI buttons */}
           <div className="flex items-center space-x-4">
-            <div className="hidden sm:block text-right">
-              <div className="text-xs text-slate-400 font-medium">Preenchimento do Plano</div>
-              <div className="text-sm font-bold text-slate-700">{calculateCompletion()}% concluído</div>
-            </div>
-            <div className="w-24 sm:w-32 bg-slate-100 h-2.5 rounded-full overflow-hidden">
-              <div 
-                className={`h-full transition-all duration-500 rounded-full ${
-                  calculateCompletion() === 100 ? "bg-emerald-600" : "bg-emerald-500"
-                }`}
-                style={{ width: `${calculateCompletion()}%` }}
-              ></div>
-            </div>
+            {isAuthenticated ? (
+              <div className="flex items-center space-x-3 sm:border-l sm:border-slate-200 sm:pl-4 sm:ml-2">
+                <div className="hidden sm:flex items-center justify-center bg-emerald-50 rounded-full h-8 w-8 text-emerald-700 font-bold text-xs ring-1 ring-emerald-100 shadow-sm" title={userRole === 'admin' ? "Administrador" : "Usuário"}>
+                  {userRole === 'admin' ? 'AD' : 'US'}
+                </div>
+                {userRole === 'admin' && (
+                  <button 
+                    onClick={() => setActiveTab(-1)}
+                    className="hidden sm:flex items-center justify-center text-xs font-semibold px-3 py-1.5 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
+                  >
+                    Admin
+                  </button>
+                )}
+                <button 
+                  onClick={handleLogout}
+                  className="flex items-center justify-center text-xs font-semibold px-3 py-1.5 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition-colors border border-rose-100"
+                >
+                  Sair
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={() => setShowLogin(true)}
+                className="flex items-center space-x-1.5 ml-4 sm:px-3 sm:py-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-all border border-transparent hover:border-emerald-100 group font-medium text-sm"
+                id="login-btn"
+              >
+                <span className="hidden sm:inline">Entrar</span>
+                <LogIn className="w-5 h-5 sm:w-4 sm:h-4 transition-transform group-hover:scale-110" />
+              </button>
+            )}
           </div>
         </div>
       </header>
 
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 print:p-0">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 print:p-0 relative">
         
         {/* Navigation Tabs (Hidden when printing) */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-3 mb-8 print:hidden">
@@ -1294,9 +1388,19 @@ ${plan.aula6.concl || "Não informado"}`;
             })}
           </nav>
 
-          <div className="text-xs text-slate-500 font-medium flex items-center space-x-1.5 bg-indigo-50/50 border border-indigo-100/50 rounded-lg px-3 py-1.5">
-            <Info className="h-3.5 w-3.5 text-indigo-500" />
-            <span>Estruturas em conformidade com as regras de ouro pedagógicas.</span>
+          <div className="hidden md:flex flex-col items-end min-w-[200px] mt-2 md:mt-0 gap-1.5">
+            <div className="flex justify-between w-full px-1">
+              <span className="text-xs text-slate-500 font-medium tracking-wide">Preenchimento</span>
+              <span className="text-xs font-bold text-emerald-600">{calculateCompletion()}%</span>
+            </div>
+            <div className="w-full bg-slate-100/80 h-2.5 rounded-full overflow-hidden border border-slate-200/60 shadow-inner">
+              <div 
+                className={`h-full transition-all duration-700 ease-out rounded-full ${
+                  calculateCompletion() === 100 ? "bg-emerald-500" : "bg-emerald-400"
+                }`}
+                style={{ width: `${calculateCompletion()}%` }}
+              ></div>
+            </div>
           </div>
         </div>
 
@@ -1315,7 +1419,22 @@ ${plan.aula6.concl || "Não informado"}`;
         )}
 
         {/* Tab contents with smooth sliding animations */}
-        <div className="min-h-[500px]">
+        <div className="relative min-h-[500px]">
+          {!isAuthenticated && (
+            <div className="absolute inset-0 z-50 bg-white/40 backdrop-blur-[2px] flex items-center justify-center rounded-2xl">
+              <button 
+                onClick={() => {
+                  setShowLogin(true);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-xl shadow-xl hover:shadow-2xl transition-all transform hover:scale-105 flex items-center gap-2"
+              >
+                <Lock className="w-5 h-5" />
+                Faça Login para Desbloquear o Gerador
+              </button>
+            </div>
+          )}
+          <div className="border-none p-0 m-0 w-full min-w-0">
           <AnimatePresence mode="wait">
             
             {/* TAB 1: IDENTIFICAÇÃO */}
@@ -2601,41 +2720,43 @@ ${plan.aula6.concl || "Não informado"}`;
             )}
 
           </AnimatePresence>
-        </div>
+          </div>
 
-        {/* Wizard Footer (Hidden when printing preview) */}
-        <div className="flex justify-between items-center mt-12 bg-white rounded-2xl border border-slate-200 p-5 print:hidden">
-          <button
-            id="btn-nav-prev"
-            disabled={activeTab === 0}
-            onClick={() => setActiveTab(prev => prev - 1)}
-            className="px-5 py-3 border border-slate-200 bg-white hover:bg-slate-50 disabled:text-slate-300 disabled:bg-slate-50 transition-colors text-xs font-semibold text-slate-700 rounded-xl flex items-center gap-1.5 cursor-pointer"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            <span>Voltar aba</span>
-          </button>
-
-          {activeTab < 3 ? (
+          {/* Wizard Footer (Hidden when printing preview) */}
+          <div className="flex justify-between items-center mt-12 bg-white rounded-2xl border border-slate-200 p-5 print:hidden border-t-0">
             <button
-              id="btn-nav-next"
-              onClick={() => setActiveTab(prev => prev + 1)}
-              className="px-6 py-3 bg-slate-800 hover:bg-slate-900 transition-colors text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+              id="btn-nav-prev"
+              disabled={activeTab === 0}
+              onClick={() => setActiveTab(prev => prev - 1)}
+              className="px-5 py-3 border border-slate-200 bg-white hover:bg-slate-50 disabled:text-slate-300 disabled:bg-slate-50 transition-colors text-xs font-semibold text-slate-700 rounded-xl flex items-center gap-1.5 cursor-pointer"
             >
-              <span>Avançar aba</span>
-              <ArrowRight className="h-4 w-4" />
+              <ArrowLeft className="h-4 w-4" />
+              <span>Voltar aba</span>
             </button>
-          ) : (
-            <button
-              id="btn-nav-generate-word"
-              onClick={downloadFilledDocx}
-              className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 transition-colors text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm"
-            >
-              <FileText className="h-4 w-4" />
-              <span>Gerar e Baixar .docx Final</span>
-            </button>
-          )}
+  
+            {activeTab < 3 ? (
+              <button
+                id="btn-nav-next"
+                onClick={() => setActiveTab(prev => prev + 1)}
+                className="px-6 py-3 bg-slate-800 hover:bg-slate-900 transition-colors text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>Avançar aba</span>
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            ) : (
+              <button
+                id="btn-nav-generate-word"
+                onClick={downloadFilledDocx}
+                className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 transition-colors text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <FileText className="h-4 w-4" />
+                <span>Gerar e Baixar .docx Final</span>
+              </button>
+            )}
+          </div>
         </div>
-
+        
+        
       </main>
 
       {/* Dynamic Printing Style overrides (Included as inline style block) */}
