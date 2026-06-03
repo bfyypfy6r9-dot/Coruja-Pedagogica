@@ -4,6 +4,8 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { createClient } from "@supabase/supabase-js";
+import cookieParser from "cookie-parser";
 
 dotenv.config({ override: true });
 
@@ -11,6 +13,29 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json({ limit: "50mb" }));
+app.use(cookieParser());
+
+// Initialize Supabase Clients
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.warn("Aviso: SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configurados.");
+}
+
+// Ensure the server doesn't crash if credentials are empty by passing dummy values during preview if needed,
+// but the auth will inherently fail when routes are hit.
+const validSupabaseUrl = supabaseUrl || "https://dummy.supabase.co";
+const dummyJwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwiaWF0IjoxNTE2MjM5MDIyfQ.valid-dummy-key-for-validation";
+const validServiceKey = supabaseServiceKey || dummyJwt;
+
+// Admin client (bypasses RLS)
+const supabaseAdmin = createClient(validSupabaseUrl, validServiceKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
+  }
+});
 
 // Initialize Gemini SDK with lazy loading helper
 let cachedAi: GoogleGenAI | null = null;
@@ -61,6 +86,145 @@ async function generateContentWithFallback(ai: GoogleGenAI, parameters: { model:
 // API Routes
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", apiConfigured: !!process.env.GEMINI_API_KEY });
+});
+
+// Middleware to check session
+const authenticate = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  let token = req.cookies.sb_token;
+  if (req.headers.authorization && req.headers.authorization.startsWith("Bearer ")) {
+    token = req.headers.authorization.split(" ")[1];
+  }
+
+  if (!token) return res.status(401).json({ error: "Não autorizado" });
+
+  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !user) return res.status(401).json({ error: "Sessão inválida" });
+
+  const { data: profile } = await supabaseAdmin.from("perfis").select("*").eq("id", user.id).single();
+  if (!profile || !profile.ativo) return res.status(403).json({ error: "Conta inativa" });
+
+  (req as any).user = { ...user, ...profile };
+  next();
+};
+
+const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if ((req as any).user.role !== 'admin') return res.status(403).json({ error: "Acesso negado" });
+  next();
+};
+
+// Auth endpoints
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    // Check if user is active in DB before actually issuing JWT for client? 
+    // Best way: login with a temporary generic client, then check database.
+    const validAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || supabaseServiceKey || dummyJwt;
+    const tempClient = createClient(validSupabaseUrl, validAnonKey);
+    const { data, error } = await tempClient.auth.signInWithPassword({ email, password });
+    
+    if (error) return res.status(401).json({ error: "Credenciais inválidas" });
+    
+    // Check if active
+    const { data: profile } = await supabaseAdmin.from("perfis").select("*").eq("id", data.user.id).single();
+    if (!profile || !profile.ativo) {
+      return res.status(403).json({ error: "Conta inativa. Contate o administrador." });
+    }
+
+    res.cookie("sb_token", data.session.access_token, { 
+      httpOnly: true, 
+      secure: true, 
+      sameSite: "none",
+      path: "/"
+    });
+    res.json({ session: data.session, user: { ...data.user, ...profile } });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  res.clearCookie("sb_token", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    path: "/"
+  });
+  res.json({ message: "Logout realizado" });
+});
+
+app.get("/api/auth/session", authenticate, (req, res) => {
+  res.json({ session: { access_token: req.cookies.sb_token }, user: (req as any).user });
+});
+
+// Admin endpoints
+app.get("/api/admin/usuarios", authenticate, requireAdmin, async (req, res) => {
+  if (!process.env.VITE_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return res.status(500).json({ error: "Sua instância Supabase não está configurada corretamente nas propriedades do app." });
+  }
+  const { data, error } = await supabaseAdmin.from("perfis").select("*").order("created_at", { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post("/api/admin/criar-usuario", authenticate, requireAdmin, async (req, res) => {
+  if (!process.env.VITE_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return res.status(500).json({ error: "Sua instância Supabase não está configurada corretamente nas propriedades do app." });
+  }
+
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: "E-mail e senha são obrigatórios." });
+  }
+
+  try {
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true
+    });
+    
+    if (authError) {
+      if (authError.message.includes("Not authorized") || authError.status === 401 || authError.status === 403) {
+        return res.status(403).json({ error: "Não autorizado: Verifique a configuração da SUPABASE_SERVICE_ROLE_KEY no admin." });
+      }
+      return res.status(400).json({ error: authError.message });
+    }
+
+    if (!authData?.user) {
+      return res.status(500).json({ error: "Erro desconhecido: Usuário não foi retornado pelo Supabase." });
+    }
+
+    const { error: dbError } = await supabaseAdmin.from("perfis").upsert({
+      id: authData.user.id,
+      email: authData.user.email,
+      role: 'user',
+      ativo: true
+    }, { onConflict: "id" });
+    
+    if (dbError) {
+      return res.status(500).json({ error: `Erro ao salvar perfil: ${dbError.message}` });
+    }
+
+    res.status(201).json({ message: "Usuário criado com sucesso", user: authData.user });
+  } catch (error: any) {
+    console.error("[criar-usuario] erro:", error);
+    res.status(500).json({ error: error.message || "Erro desconhecido ao tentar criar usuário." });
+  }
+});
+
+app.patch("/api/admin/usuario/:id/ativo", authenticate, requireAdmin, async (req, res) => {
+  const { ativo } = req.body;
+  const { error } = await supabaseAdmin.from("perfis").update({ ativo }).eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+app.patch("/api/admin/usuario/:id/role", authenticate, requireAdmin, async (req, res) => {
+  const { role } = req.body;
+  const { error } = await supabaseAdmin.from("perfis").update({ role }).eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
 });
 
 // Endpoint to suggest BNCC skills and competency mapping
