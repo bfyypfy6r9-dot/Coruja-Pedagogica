@@ -738,12 +738,24 @@ export default function App() {
     } catch (err: any) {
       console.error(err);
       const msg = err.message || "";
-      if (msg.includes("RESOURCE_EXHAUSTED") || msg.includes("Quota exceeded") || msg.includes("quota exceeded") || msg.includes("429")) {
+      if (msg.includes("expired") || msg.includes("API key expired") || msg.includes("API_KEY_INVALID")) {
+        setErrorMessage(
+          "A sua chave de API do Gemini (GEMINI_API_KEY) expirou ou é inválida. Por favor, acesse o painel do seu servidor (ex: Render) ou as Configurações do seu app, e atualize a variável GEMINI_API_KEY com uma chave de API válida e ativa obtida no Google AI Studio (https://aistudio.google.com/)"
+        );
+      } else if (msg.includes("RESOURCE_EXHAUSTED") || msg.includes("Quota exceeded") || msg.includes("quota exceeded") || msg.includes("429")) {
         setErrorMessage(
           "Limite de cota de inteligência artificial excedido (Erro 429). Isso significa que a sua chave de API gratuita atingiu o limite diário padrão do Google (20 solicitações por dia para o modelo gemini-3.5-flash). Você pode voltar a utilizar gratuitamente assim que a cota for reiniciada após 24 horas do primeiro uso. Se precisar de uso ilimitado imediatamente, crie uma chave de API com cobrança (pay-as-you-go) ativada nas configurações do Google AI Studio."
         );
+      } else if (msg.includes("Load failed") || msg.includes("Failed to fetch") || msg.includes("não foi encontrada") || msg.includes("não configurada") || msg.includes("configurações")) {
+        setErrorMessage(
+          "Aviso: Para usar o preenchimento automático por Inteligência Artificial, é necessário configurar a chave GEMINI_API_KEY no painel do seu servidor (ex: Render). Como você não possui uma IA ativa cadastrada, você pode fechar este aviso e usar normalmente o painel digitando suas habilidades diretamente no campo de texto, ou usar o 'Painel Rápido BNCC (Offline)' à direita para carregar as habilidades modelos instantaneamente sem precisar de IA!"
+        );
+      } else if (msg.includes("503") || msg.includes("alta demanda") || msg.includes("INDISPONÍVEL")) {
+        setErrorMessage(
+          "O modelo de Inteligência Artificial está passando por um pico de alta demanda no momento (Erro 503). Por favor, aguarde alguns instantes e tente novamente. Se estiver com pressa, você pode preencher os campos manualmente ou usar o 'Painel Rápido BNCC (Offline)' à direita da tela."
+        );
       } else {
-        setErrorMessage(`Erro ao consultar inteligência artificial da BNCC: ${msg}. Por favor, revise a sua chave de API nas configurações.`);
+        setErrorMessage(`Erro ao consultar inteligência artificial da BNCC: ${msg}.`);
       }
     } finally {
       setIsSuggestingBNCC(false);
@@ -813,12 +825,24 @@ export default function App() {
     } catch (err: any) {
       console.error(err);
       const msg = err.message || "";
-      if (msg.includes("RESOURCE_EXHAUSTED") || msg.includes("Quota exceeded") || msg.includes("quota exceeded") || msg.includes("429")) {
+      if (msg.includes("expired") || msg.includes("API key expired") || msg.includes("API_KEY_INVALID")) {
+        setErrorMessage(
+          "A sua chave de API do Gemini (GEMINI_API_KEY) expirou ou é inválida. Por favor, acesse o painel do seu servidor (ex: Render) ou as Configurações do seu app, e atualize a variável GEMINI_API_KEY com uma chave de API válida e ativa obtida no Google AI Studio (https://aistudio.google.com/)"
+        );
+      } else if (msg.includes("RESOURCE_EXHAUSTED") || msg.includes("Quota exceeded") || msg.includes("quota exceeded") || msg.includes("429")) {
         setErrorMessage(
           "Limite de cota de inteligência artificial excedido (Erro 429). A sua chave de API gratuita do Gemini atingiu o limite padrão diário do Google (20 solicitações por dia para o modelo gemini-3.5-flash). Você poderá voltar a usar gratuitamente assim que a cota for reiniciada após 24 horas. Se precisar de uso imediato e contínuo, configure o faturamento (billing) no Google AI Studio e use uma chave de API paga."
         );
+      } else if (msg.includes("Load failed") || msg.includes("Failed to fetch") || msg.includes("não foi encontrada") || msg.includes("não configurada") || msg.includes("configurações")) {
+        setErrorMessage(
+          "Aviso: Para gerar aulas com Inteligência Artificial, é necessário configurar a chave GEMINI_API_KEY no painel do seu servidor (ex: Render). Como você não possui uma IA ativa cadastrada, você pode fechar este aviso e digitar o roteiro de suas aulas normalmente e usufruir da plataforma offline!"
+        );
+      } else if (msg.includes("503") || msg.includes("alta demanda") || msg.includes("INDISPONÍVEL")) {
+        setErrorMessage(
+          "O modelo de Inteligência Artificial está passando por um pico de alta demanda no momento (Erro 503). Por favor, aguarde alguns instantes e tente novamente. Se estiver com pressa, você pode estruturar as etapas da aula manualmente."
+        );
       } else {
-        setErrorMessage(`Impossível criar aulas sequenciais agora: ${msg}. Verifique a sua chave de API nas configurações ou tente novamente.`);
+        setErrorMessage(`Impossível criar aulas sequenciais agora: ${msg}. Tente novamente mais tarde.`);
       }
     } finally {
       setIsGeneratingLessons(false);
