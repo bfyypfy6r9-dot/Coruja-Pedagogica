@@ -23,6 +23,12 @@ export interface LessonPlanData {
   aula4: ClassLesson;
   aula5: ClassLesson;
   aula6: ClassLesson;
+  aula7: ClassLesson;
+  aula8: ClassLesson;
+  aula9: ClassLesson;
+  aula10: ClassLesson;
+  aula11: ClassLesson;
+  aula12: ClassLesson;
 }
 
 export interface BNCCSkill {
