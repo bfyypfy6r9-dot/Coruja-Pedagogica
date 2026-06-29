@@ -121,7 +121,8 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     
-    // Check if user is active in DB before actually issuing JWT for client
+    // Check if user is active in DB before actually issuing JWT for client? 
+    // Best way: login with a temporary generic client, then check database.
     const validAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || supabaseServiceKey || dummyJwt;
     const tempClient = createClient(validSupabaseUrl, validAnonKey);
     const { data, error } = await tempClient.auth.signInWithPassword({ email, password });
@@ -234,6 +235,8 @@ app.patch("/api/admin/usuario/:id/role", authenticate, requireAdmin, async (req,
 app.post("/webhook-hotmart", async (req, res) => {
   try {
     const hotmartToken = process.env.HOTMART_HOTTOK;
+    
+    // Na v1 pode vir direto no body.hottok ou headers, na v2 costuma vir nos headers
     const receivedToken = req.headers["x-hotmart-hottok"] || (req.body && req.body.hottok);
 
     if (!hotmartToken) {
@@ -241,13 +244,16 @@ app.post("/webhook-hotmart", async (req, res) => {
       return res.status(500).send("Erro interno do servidor.");
     }
 
+    // Camada de Segurança Requerida: Validar o Hottok
     if (receivedToken !== hotmartToken) {
       console.error("Tentativa de acesso não autorizada. Hottok inválido:", receivedToken);
       return res.status(403).send("Não autorizado");
     }
 
+    // Identifica o evento (V1 envia 'status', V2 envia 'event')
     const event = req.body.event || req.body.status;
 
+    // Queremos criar o usuário APENAS se a compra foi aprovada
     if (event === "PURCHASE_APPROVED" || event === "approved") {
       const email = req.body.data?.buyer?.email || req.body.email;
       const firstName = req.body.data?.buyer?.name?.split(' ')[0] || req.body.first_name || 'Usuário';
@@ -256,6 +262,7 @@ app.post("/webhook-hotmart", async (req, res) => {
         throw new Error("E-mail do comprador não encontrado no payload da Hotmart.");
       }
 
+      // 1. Gerar senha aleatória forte de 8 caracteres
       const geradorSenha = () => {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&';
         let passwd = '';
@@ -266,15 +273,19 @@ app.post("/webhook-hotmart", async (req, res) => {
       };
       const novaSenha = geradorSenha();
 
+      // 2. Criar ou atualizar usuário no Supabase
       const { data: usuarioExistente } = await supabaseAdmin.from("perfis").select("id").eq("email", email).single();
       
       let uId = "";
 
       if (usuarioExistente) {
+        // Se a pessoa comprar de novo (ex renovação que deu erro e ela recomprou), 
+        // ou já tem conta, podemos atualizar a senha e reativar.
         uId = usuarioExistente.id;
         await supabaseAdmin.auth.admin.updateUserById(uId, { password: novaSenha });
         await supabaseAdmin.from("perfis").update({ ativo: true, role: 'user' }).eq("id", uId);
       } else {
+        // Criar conta totalmente nova no Auth do Supabase
         const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
           email,
           password: novaSenha,
@@ -286,19 +297,21 @@ app.post("/webhook-hotmart", async (req, res) => {
         }
         uId = authData.user.id;
 
+        // Inserir registro correspondente na tabela "perfis"
         await supabaseAdmin.from("perfis").upsert({
           id: uId,
           email: email,
-          role: 'user',
+          role: 'user', // Pode ser usado 'premium' ou afins caso o App.tsx limite funções por role
           ativo: true
         });
       }
 
+      // 3. Disparar e-mail com os dados de acesso
       if (process.env.SMTP_HOST && process.env.SMTP_USER) {
         const transporter = nodemailer.createTransport({
           host: process.env.SMTP_HOST,
           port: Number(process.env.SMTP_PORT) || 465,
-          secure: Number(process.env.SMTP_PORT) === 465,
+          secure: Number(process.env.SMTP_PORT) === 465, // porta 465 exige TLS (secure true)
           auth: {
             user: process.env.SMTP_USER,
             pass: process.env.SMTP_PASS,
@@ -336,6 +349,7 @@ app.post("/webhook-hotmart", async (req, res) => {
       return res.status(200).send("Usuário cadastrado com sucesso!");
     }
 
+    // Caso o evento seja CART_ABANDONED, PURCHASE_REFUNDED, ignorar, mas com status 200
     return res.status(200).send("Evento Webhook recebido, mas não aplicável.");
 
   } catch (error: any) {
@@ -428,8 +442,8 @@ app.post("/api/gemini/generate-lesson-plan", async (req, res) => {
     } = req.body;
 
     const lessonsToGen: number[] = Array.isArray(selectedLessons) && selectedLessons.length > 0 
-      ? selectedLessons.map(Number).filter(n => n >= 1 && n <= 6)
-      : [1, 2, 3, 4, 5, 6];
+      ? selectedLessons.map(Number).filter(n => n >= 1 && n <= 12)
+      : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
     const systemInstruction = `Você é um especialista em planejamento pedagógico e metodologias ativas de ensino.
 Sua missão é desenvolver o detalhamento de aulas sequenciais específicas baseadas nas informações do professor.
