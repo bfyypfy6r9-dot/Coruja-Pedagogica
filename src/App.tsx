@@ -52,6 +52,12 @@ const initialPlanState: LessonPlanData = {
   aula4: { intro: "", desenv: "", concl: "" },
   aula5: { intro: "", desenv: "", concl: "" },
   aula6: { intro: "", desenv: "", concl: "" },
+  aula7: { intro: "", desenv: "", concl: "" },
+  aula8: { intro: "", desenv: "", concl: "" },
+  aula9: { intro: "", desenv: "", concl: "" },
+  aula10: { intro: "", desenv: "", concl: "" },
+  aula11: { intro: "", desenv: "", concl: "" },
+  aula12: { intro: "", desenv: "", concl: "" },
 };
 
 /**
@@ -159,8 +165,8 @@ function smartFillDocxXml(xmlStr: string, plan: LessonPlanData): string {
     ];
 
     // Add Lesson 1 to 6 dynamically
-    for (let i = 1; i <= 6; i++) {
-      const key = `aula${i}` as "aula1" | "aula2" | "aula3" | "aula4" | "aula5" | "aula6";
+    for (let i = 1; i <= 12; i++) {
+      const key = `aula${i}` as LessonKey;
       const aula = plan[key];
       
       fieldMappings.push(
@@ -369,22 +375,20 @@ function Login({ onLogin, onCancel }: LoginProps) {
     setError(null);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
       });
 
-      if (error) {
-        throw new Error(error.message);
+      const result = await res.json();
+      if (!res.ok) {
+        throw new Error(result.error || 'Erro ao fazer login');
       }
 
-      const { data: perfil } = await supabase
-        .from('perfis')
-        .select('role')
-        .eq('id', data.user.id)
-        .single();
-
-      onLogin(data.session, { ...data.user, role: perfil?.role || 'usuario' });
+      onLogin(result.session, result.user);
     } catch (err: any) {
       setError(err.message || 'Erro ao fazer login');
     } finally {
@@ -513,7 +517,7 @@ export default function App() {
   
   // Active lesson editor sub-tab
   const [activeLessonNum, setActiveLessonNum] = useState<number>(1);
-  const [selectedLessonsToGen, setSelectedLessonsToGen] = useState<number[]>([1, 2, 3, 4, 5, 6]);
+  const [selectedLessonsToGen, setSelectedLessonsToGen] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   const [unifyLessons, setUnifyLessons] = useState<boolean>(false);
 
   // Export mode: "a" = Opção A (Fidelidade - Mapeamento), "b" = Opção B (Criativa - Markdown), "c" = Visualização A4
@@ -553,14 +557,8 @@ export default function App() {
         if (res.ok) {
           const data = await res.json();
           if (data.session && data.user) {
-            const { data: perfil } = await supabase
-              .from('perfis')
-              .select('role')
-              .eq('id', data.user.id)
-              .single();
-
             setIsAuthenticated(true);
-            setUserRole(perfil?.role || 'usuario');
+            setUserRole(data.user.role || 'usuario');
             setSupabaseSession(data.session);
           }
         }
@@ -638,9 +636,9 @@ export default function App() {
     }));
   };
 
-  // Handle lesson-specific changes
+type LessonKey = "aula1" | "aula2" | "aula3" | "aula4" | "aula5" | "aula6" | "aula7" | "aula8" | "aula9" | "aula10" | "aula11" | "aula12";
   const handleLessonChange = (
-    aulaKey: "aula1" | "aula2" | "aula3" | "aula4" | "aula5" | "aula6", 
+    aulaKey: LessonKey, 
     subKey: "intro" | "desenv" | "concl", 
     value: string
   ) => {
@@ -671,7 +669,7 @@ export default function App() {
     });
 
     // Check lessons (6 lessons * 3 fields each)
-    const lessons: ("aula1" | "aula2" | "aula3" | "aula4" | "aula5" | "aula6")[] = ["aula1", "aula2", "aula3", "aula4", "aula5", "aula6"];
+    const lessons: LessonKey[] = ["aula1", "aula2", "aula3", "aula4", "aula5", "aula6", "aula7", "aula8", "aula9", "aula10", "aula11", "aula12"];
     lessons.forEach(l => {
       totalFields += 3;
       if (plan[l].intro.trim() !== "") filledFields++;
@@ -818,6 +816,12 @@ export default function App() {
         aula4: data.aula4 !== undefined ? data.aula4 : prev.aula4,
         aula5: data.aula5 !== undefined ? data.aula5 : prev.aula5,
         aula6: data.aula6 !== undefined ? data.aula6 : prev.aula6,
+        aula7: data.aula7 !== undefined ? data.aula7 : prev.aula7,
+        aula8: data.aula8 !== undefined ? data.aula8 : prev.aula8,
+        aula9: data.aula9 !== undefined ? data.aula9 : prev.aula9,
+        aula10: data.aula10 !== undefined ? data.aula10 : prev.aula10,
+        aula11: data.aula11 !== undefined ? data.aula11 : prev.aula11,
+        aula12: data.aula12 !== undefined ? data.aula12 : prev.aula12,
       }));
 
       const generatedListStr = selectedLessonsToGen.sort((a,b) => a-b).map(n => `Aula ${n}`).join(", ");
@@ -1124,8 +1128,8 @@ export default function App() {
         };
 
         // Complete the lesson loop mapping dynamically so we cover all conceivable combinations
-        for (let i = 1; i <= 6; i++) {
-          const key = `aula${i}` as "aula1" | "aula2" | "aula3" | "aula4" | "aula5" | "aula6";
+        for (let i = 1; i <= 12; i++) {
+          const key = `aula${i}` as LessonKey;
           const aula = plan[key];
 
           // Intro variants
@@ -2155,7 +2159,7 @@ ${plan.aula6.concl || "Não informado"}`;
                           <span className="text-[10px] text-slate-400 mt-0.5">As aulas marcadas serão geradas/sobrescritas pela IA</span>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
-                          {[1, 2, 3, 4, 5, 6].map((num) => {
+                          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((num) => {
                             const isChecked = selectedLessonsToGen.includes(num);
                             return (
                               <label 
@@ -2230,8 +2234,8 @@ ${plan.aula6.concl || "Não informado"}`;
 
                     {/* Sequential class switch tabs */}
                     <div className="flex border-b border-slate-100 mb-6 flex-wrap">
-                      {[1, 2, 3, 4, 5, 6].map((num) => {
-                        const aulaKey = `aula${num}` as "aula1" | "aula2" | "aula3" | "aula4" | "aula5" | "aula6";
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((num) => {
+                        const aulaKey = `aula${num}` as LessonKey;
                         const isValid = isLessonStructureValid(aulaKey);
                         return (
                           <button
@@ -2689,10 +2693,10 @@ ${plan.aula6.concl || "Não informado"}`;
                         </div>
 
                         <div className="border-t border-slate-250 pt-5">
-                          <h4 className="font-extrabold text-indigo-950 uppercase text-[10.5px] tracking-widest mb-3">II. ATIVIDADES SEQUENCIAIS DE CLASSE (AULAS 1 A 6)</h4>
+                          <h4 className="font-extrabold text-indigo-950 uppercase text-[10.5px] tracking-widest mb-3">II. ATIVIDADES SEQUENCIAIS DE CLASSE</h4>
                           <div className="space-y-5">
-                            {[1, 2, 3, 4, 5, 6].map((num) => {
-                              const lesson = plan[`aula${num}` as "aula1" | "aula2" | "aula3" | "aula4" | "aula5" | "aula6"];
+                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((num) => {
+                              const lesson = plan[`aula${num}` as LessonKey];
                               return (
                                 <div key={num} className="bg-white border border-slate-200 rounded-2xl p-4.5 space-y-3 shadow-xs">
                                   <div className="flex justify-between items-center border-b border-slate-100 pb-2">
@@ -2816,8 +2820,8 @@ ${plan.aula6.concl || "Não informado"}`;
                                 <span className="text-[9px] bg-emerald-600 text-white uppercase px-1.5 py-0.5 rounded font-mono font-bold">Unificado</span>
                               </div>
                               <div className="divide-y divide-slate-200">
-                                {[1, 2, 3, 4, 5, 6].map((num) => {
-                                  const lesson = plan[`aula${num}` as "aula1" | "aula2" | "aula3" | "aula4" | "aula5" | "aula6"];
+                                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((num) => {
+                                  const lesson = plan[`aula${num}` as LessonKey];
                                   const hasContent = lesson.intro?.trim() || lesson.desenv?.trim() || lesson.concl?.trim();
                                   if (!hasContent) return null;
 
@@ -2844,8 +2848,8 @@ ${plan.aula6.concl || "Não informado"}`;
                               </div>
                             </div>
                           ) : (
-                            [1, 2, 3, 4, 5, 6].map((num) => {
-                              const lesson = plan[`aula${num}` as "aula1" | "aula2" | "aula3" | "aula4" | "aula5" | "aula6"];
+                            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((num) => {
+                              const lesson = plan[`aula${num}` as LessonKey];
                               return (
                                 <div key={num} className="border border-slate-200 rounded-lg overflow-hidden text-xs">
                                   <div className="bg-slate-800 text-white font-bold p-2 text-xs flex justify-between items-center">
